@@ -17,3 +17,30 @@ Aplicación de microservicios para la gestión de viajes.
 ```bash
 docker-compose up
 ```
+
+## Worker Celery
+
+Servicios agregados:
+- `redis` (broker/result backend)
+- `celery-worker` (colas `ops.process` y `monitoring.ping`)
+
+SQLite compartida en volumen Docker:
+- ruta en contenedores: `/data/operations.db`
+
+### Levantar stack
+
+```bash
+docker-compose up -d --build
+```
+
+### Publicar Ping al worker (Echo por cola)
+
+```bash
+docker-compose exec celery-worker python -c "from app.worker.tasks import ping_worker; r = ping_worker.delay('req-001'); print(r.id)"
+```
+
+### Publicar procesamiento asíncrono
+
+```bash
+docker-compose exec celery-worker python -c "from app.worker.tasks import process_operation; r = process_operation.delay('op-001'); print(r.id)"
+```
