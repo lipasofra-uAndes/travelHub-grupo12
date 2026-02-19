@@ -17,7 +17,7 @@ SEARCH_SERVICE = "http://localhost:5003"
 
 
 class Health(Resource):
-    """Health check endpoint"""
+    """Health check del API Gateway"""
     def get(self):
         return {
             "status": "UP",
@@ -26,49 +26,49 @@ class Health(Resource):
 
 
 class Ready(Resource):
-    """Readiness check endpoint"""
+    """Verificación de disponibilidad del API Gateway"""
     def get(self):
         return {
             "status": "READY",
             "service": "API Gateway",
-            "message": "API Gateway is ready to accept requests"
+            "message": "API Gateway listo para aceptar solicitudes"
         }, 200
 
 
 class Reserve(Resource):
-    """Proxy requests to reserves service"""
+    """Proxy de solicitudes al servicio de reservas"""
     def post(self):
         try:
             data = request.get_json()
             response = requests.post(f"{RESERVES_SERVICE}/reserve", json=data, timeout=5)
             return response.json(), response.status_code
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error calling reserves service: {str(e)}")
-            return {"error": "Reserves service unavailable"}, 503
+            logger.error(f"Error al llamar al servicio de reservas: {str(e)}")
+            return {"error": "Servicio de reservas no disponible"}, 503
 
 
 class Pay(Resource):
-    """Proxy requests to payments service"""
+    """Proxy de solicitudes al servicio de pagos"""
     def post(self):
         try:
             data = request.get_json()
             response = requests.post(f"{PAYMENTS_SERVICE}/pay", json=data, timeout=5)
             return response.json(), response.status_code
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error calling payments service: {str(e)}")
-            return {"error": "Payments service unavailable"}, 503
+            logger.error(f"Error al llamar al servicio de pagos: {str(e)}")
+            return {"error": "Servicio de pagos no disponible"}, 503
 
 
 class Search(Resource):
-    """Proxy requests to search service"""
+    """Proxy de solicitudes al servicio de búsqueda"""
     def get(self):
         try:
             params = request.args
             response = requests.get(f"{SEARCH_SERVICE}/search", params=params, timeout=5)
             return response.json(), response.status_code
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error calling search service: {str(e)}")
-            return {"error": "Search service unavailable"}, 503
+            logger.error(f"Error al llamar al servicio de búsqueda: {str(e)}")
+            return {"error": "Servicio de búsqueda no disponible"}, 503
 
 
 
@@ -81,5 +81,5 @@ api.add_resource(Search, '/search')
 
 
 if __name__ == '__main__':
-    logger.info("Starting API Gateway on port 5000")
+    logger.info("Iniciando API Gateway en puerto 5000")
     app.run(host='0.0.0.0', port=5000, debug=False)

@@ -1,6 +1,7 @@
 from flask import Flask, request
 from flask_restful import Api, Resource
 import logging
+from uuid import uuid4
 
 app = Flask(__name__)
 api = Api(app)
@@ -8,17 +9,37 @@ api = Api(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Mock search database
-search_db = [
-    {"id": 1, "name": "Product A", "description": "Description for product A", "price": 100},
-    {"id": 2, "name": "Product B", "description": "Description for product B", "price": 200},
-    {"id": 3, "name": "Product C", "description": "Description for product C", "price": 150},
-    {"id": 4, "name": "Product D", "description": "Description for product D", "price": 180},
+# Almacenamiento de datos mock - Propiedades/Hospedajes
+propiedades_db = [
+    {
+        "id": str(uuid4()),
+        "nombre": "Hotel Central",
+        "pais": "Argentina",
+        "direccion": "Av. Corrientes 123, Buenos Aires"
+    },
+    {
+        "id": str(uuid4()),
+        "nombre": "Hostal Andino",
+        "pais": "Chile",
+        "direccion": "Calle Lastarria 50, Santiago"
+    },
+    {
+        "id": str(uuid4()),
+        "nombre": "Posada del Viajero",
+        "pais": "Perú",
+        "direccion": "Jr. Pachacutec 200, Lima"
+    },
+    {
+        "id": str(uuid4()),
+        "nombre": "Casa Paraíso",
+        "pais": "Colombia",
+        "direccion": "Carrera 7 No. 45-100, Bogotá"
+    },
 ]
 
 
 class Search(Resource):
-    """Handle search requests"""
+    """Maneja solicitudes de búsqueda"""
     def get(self):
         try:
             query = request.args.get('q', '').lower()
@@ -27,31 +48,33 @@ class Search(Resource):
                 return {
                     "success": True,
                     "query": query,
-                    "results": search_db,
-                    "count": len(search_db)
+                    "resultados": propiedades_db,
+                    "cantidad": len(propiedades_db)
                 }, 200
             
-            # Filter results based on query
-            results = [
-                item for item in search_db
-                if query in item['name'].lower() or query in item['description'].lower()
+            # Filtrar resultados basados en la búsqueda (nombre, país, dirección)
+            resultados = [
+                propiedad for propiedad in propiedades_db
+                if query in propiedad['nombre'].lower() 
+                or query in propiedad['pais'].lower() 
+                or query in propiedad['direccion'].lower()
             ]
             
-            logger.info(f"Search query (GET): '{query}' - Found {len(results)} results")
+            logger.info(f"Búsqueda (GET): '{query}' - Se encontraron {len(resultados)} resultados")
             
             return {
                 "success": True,
                 "query": query,
-                "results": results,
-                "count": len(results)
+                "resultados": resultados,
+                "cantidad": len(resultados)
             }, 200
         except Exception as e:
-            logger.error(f"Error in search service (GET): {str(e)}")
+            logger.error(f"Error en servicio de búsqueda (GET): {str(e)}")
             return {"error": str(e)}, 500
 
 
 class Health(Resource):
-    """Health check for search service"""
+    """Health check del servicio de búsqueda"""
     def get(self):
         return {"status": "UP", "service": "Search"}, 200
 
@@ -62,5 +85,5 @@ api.add_resource(Health, '/health')
 
 
 if __name__ == '__main__':
-    logger.info("Starting Search Service on port 5003")
+    logger.info("Iniciando servicio de búsqueda en puerto 5003")
     app.run(host='0.0.0.0', port=5003, debug=False)

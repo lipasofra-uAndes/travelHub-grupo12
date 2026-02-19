@@ -2,6 +2,7 @@ from flask import Flask, request
 from flask_restful import Api, Resource
 import logging
 from datetime import datetime
+from uuid import uuid4
 
 app = Flask(__name__)
 api = Api(app)
@@ -9,48 +10,47 @@ api = Api(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Mock data storage
+# Almacenamiento de datos mock
 reserves_db = []
 
 
 class Reserve(Resource):
-    """Handle reservation requests"""
+    """Maneja solicitudes de reserva"""
     def post(self):
         try:
             data = request.get_json()
             
-            # Validate required fields
-            required_fields = ['user_id', 'item_id', 'date']
+            # Validar campos requeridos
+            required_fields = ['total', 'moneda']
             for field in required_fields:
                 if field not in data:
-                    return {"error": f"Missing required field: {field}"}, 400
+                    return {"error": f"Campo requerido faltante: {field}"}, 400
             
-            # Create reservation object
+            # Crear objeto de reserva
             reservation = {
-                "id": len(reserves_db) + 1,
-                "user_id": data.get('user_id'),
-                "item_id": data.get('item_id'),
-                "date": data.get('date'),
-                "status": "CONFIRMED",
-                "created_at": datetime.now().isoformat()
+                "id": str(uuid4()),
+                "estado": "CONFIRMADA",
+                "total": data.get('total'),
+                "moneda": data.get('moneda'),
+                "creadaEn": datetime.now().isoformat()
             }
             
             reserves_db.append(reservation)
-            logger.info(f"Reservation created: {reservation}")
+            logger.info(f"Reserva creada: {reservation}")
             
             return {
                 "success": True,
-                "message": "Reservation confirmed",
-                "reservation": reservation
+                "message": "Reserva confirmada",
+                "reserva": reservation
             }, 201
             
         except Exception as e:
-            logger.error(f"Error in reserve service: {str(e)}")
+            logger.error(f"Error en servicio de reservas: {str(e)}")
             return {"error": str(e)}, 500
 
 
 class Health(Resource):
-    """Health check for reserves service"""
+    """Health check del servicio de reservas"""
     def get(self):
         return {"status": "UP", "service": "Reserves"}, 200
 
@@ -61,5 +61,5 @@ api.add_resource(Health, '/health')
 
 
 if __name__ == '__main__':
-    logger.info("Starting Reserves Service on port 5001")
+    logger.info("Iniciando servicio de reservas en puerto 5001")
     app.run(host='0.0.0.0', port=5001, debug=False)
