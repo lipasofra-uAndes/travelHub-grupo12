@@ -9,6 +9,15 @@ from app.models.operation import Operation
 from app.dtos.operation import ProcessOperationTaskDTO
 from app.dtos.monitoring import EchoResponseDTO
 from app.worker.db import get_operation, save_operation, get_last_echo, init_db
+from app.worker.config import reset_config, set_force_failure, set_failure_rate
+
+
+@pytest.fixture(autouse=True)
+def reset_worker_config():
+    """Resetea la configuración del worker antes de cada test"""
+    reset_config()
+    yield
+    reset_config()
 
 
 class TestProcessOperationTask:
@@ -46,14 +55,15 @@ class TestProcessOperationTask:
 
     @patch("app.worker.tasks.init_db")
     def test_process_operation_with_failure_flag(self, mock_init_db, initialized_db, sample_operation_id):
-        """Procesa operación que tiene flag force_fail"""
+        """Procesa operación cuando worker está configurado para fallar"""
         from app.worker.tasks import process_operation
         from celery.exceptions import MaxRetriesExceededError
 
-        # Operación con flag para simular falla
-        op = Operation.pending(
-            sample_operation_id, "pay", {"amount": 100, "force_fail": True}
-        )
+        # Configura worker para fallar siempre
+        set_force_failure(True)
+
+        # Operación normal
+        op = Operation.pending(sample_operation_id, "pay", {"amount": 100})
         save_operation(op)
 
         # Task debe reintentar y eventualmente fallar
@@ -157,7 +167,7 @@ class TestTaskIntegration:
         """Ciclo: procesa operación, luego ping confirma worker está UP"""
         from app.worker.tasks import process_operation, ping_worker
 
-        # 1. Procesa operación
+        # 1. Procesa operación exitosamente
         op = Operation.pending(sample_operation_id, "pay", {"amount": 50})
         save_operation(op)
         result1 = process_operation(sample_operation_id)
@@ -193,9 +203,15 @@ class TestTaskIntegration:
         for i in range(3):
             process_operation(f"op-parallel-{i}")
 
+        # Resetea la configuración para limpiar cualquier fallo registrado
+        reset_config()
+
+        # Genera IDs únicos para estos pings
+        ping_ids = [f"ping-parallel-test-{i}" for i in range(3)]
+
         # Intercala pings
-        for i in range(3):
-            ping_worker(f"ping-parallel-{i}")
+        for ping_id in ping_ids:
+            ping_worker(ping_id)
 
         # Verifica que todas las operaciones se procesaron
         from app.worker.db import get_recent_echoes
@@ -204,6 +220,66 @@ class TestTaskIntegration:
             op = get_operation(f"op-parallel-{i}")
             assert op.status == "PROCESSED"
 
-        # Verifica que todos los pings se registraron
-        echoes = get_recent_echoes("worker", limit=10)
-        assert len(echoes) >= 3
+        # Verifica que nuestros pings fueron registrados con estado UP
+        echoes = get_recent_echoes("worker", limit=100)
+        our_echoes = [e for e in echoes if e.request_id in ping_ids]
+        assert len(our_echoes) == 3
+        for echo in our_echoes:
+            assert echo.status == "UP"
+
+class TestWorkerHealthDetection:
+    """Tests para detección de salud del worker mediante ping/echo"""
+
+    @patch("app.worker.tasks.init_db")
+    def test_ping_reports_unhealthy_after_failure(self, mock_init_db, initialized_db):
+        """Ping reporta UNHEALTHY inmediatamente después de un fallo"""
+        from app.worker.tasks import ping_worker
+        from app.worker.config import record_failure
+
+        # Simula que acaba de haber un fallo
+        record_failure()
+
+        # Ping debe reportar UNHEALTHY
+        result = ping_worker("ping-after-failure")
+        assert result["status"] == "UNHEALTHY"
+
+        # Echo debe estar registrado como UNHEALTHY
+        echo_last = get_last_echo("worker")
+        assert echo_last.status == "UNHEALTHY"
+
+    @patch("app.worker.tasks.init_db")
+    def test_ping_reports_up_when_healthy(self, mock_init_db, initialized_db):
+        """Ping reporta UP cuando no hay fallos recientes"""
+        from app.worker.tasks import ping_worker
+
+        # Sin fallos registrados, ping debe ser UP
+        result = ping_worker("ping-healthy")
+        assert result["status"] == "UP"
+
+        echo_last = get_last_echo("worker")
+        assert echo_last.status == "UP"
+
+    @patch("app.worker.tasks.init_db")
+    def test_failure_rate_triggers_unhealthy(self, mock_init_db, initialized_db, sample_operation_id):
+        """Configura rate de fallo y verifica que ping reporta UNHEALTHY"""
+        from app.worker.tasks import process_operation, ping_worker
+
+        # Configura 100% de probabilidad de fallo
+        set_failure_rate(1.0)
+
+        # Crea operación
+        op = Operation.pending(sample_operation_id, "pay", {"amount": 100})
+        save_operation(op)
+
+        # Intenta procesar (fallará)
+        try:
+            process_operation(sample_operation_id)
+        except RuntimeError:
+            pass  # Se espera que falle
+
+        # Ping debe reportar UNHEALTHY (porque hubo fallo reciente)
+        result = ping_worker("ping-after-configured-failure")
+        assert result["status"] == "UNHEALTHY"
+
+        echo = get_last_echo("worker")
+        assert echo.status == "UNHEALTHY"

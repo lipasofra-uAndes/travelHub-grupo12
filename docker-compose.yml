@@ -27,7 +27,9 @@ services:
   celery-worker:
     build: .
     container_name: celery-worker
-    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info --queues=ops.process,monitoring.ping
+    ports:
+      - "5005:5005"
+    command: python app/worker/start_worker.py
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0

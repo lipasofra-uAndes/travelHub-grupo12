@@ -5,6 +5,12 @@ from celery.exceptions import MaxRetriesExceededError
 
 from app.worker.celery_app import celery_app
 from app.worker.db import get_operation, init_db, log_echo, update_operation_status
+from app.worker.config import (
+    get_failure_rate,
+    get_force_failure,
+    record_failure,
+    has_recent_failure,
+)
 from app.constants.queues import (
     TASK_PROCESS_OPERATION,
     TASK_PING_WORKER,
@@ -26,12 +32,13 @@ def process_operation(self, operation_id: str):
 
         time.sleep(0.3)
 
-        payload = operation.payload or {}
-        fail_rate = float(payload.get("fail_rate", 0.0))
-        force_fail = bool(payload.get("force_fail", False))
+        # Verificar si debe fallar según configuración dinámica
+        force_fail = get_force_failure()
+        fail_rate = get_failure_rate()
 
         if force_fail or (fail_rate > 0 and random.random() < fail_rate):
-            raise RuntimeError("Simulated background processing failure")
+            record_failure()
+            raise RuntimeError("Worker configured to fail")
 
         update_operation_status(operation_id, "PROCESSED")
         return {"operation_id": operation_id, "status": "PROCESSED"}
@@ -51,14 +58,18 @@ def process_operation(self, operation_id: str):
 def ping_worker(request_id: str):
     ts = datetime.utcnow().isoformat() + "Z"
 
+    # Determinar si el worker está healthy
+    # Si hubo un fallo en los últimos 30 segundos, reportar UNHEALTHY
+    status = "UNHEALTHY" if has_recent_failure(seconds=30) else "UP"
+
     payload = {
         "service": "worker",
         "request_id": request_id,
-        "status": "UP",
+        "status": status,
         "ts": ts,
     }
 
-    log_echo(service="worker", request_id=request_id, status="UP", ts=ts)
+    log_echo(service="worker", request_id=request_id, status=status, ts=ts)
 
     celery_app.send_task(
         TASK_ECHO_RESPONSE,
