@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  api-gateway:
+    build: .
+    container_name: api-gateway
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+    command: python app/api_gateway/gateway.py
+    networks:
+      - microservices-network
+    restart: unless-stopped
+
+  reserves-service:
+    build: .
+    container_name: reserves-service
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_ENV=development
+    command: python app/services/reserves/reserves.py
+    networks:
+      - microservices-network
+    restart: unless-stopped
+
+  payments-service:
+    build: .
+    container_name: payments-service
+    ports:
+      - "5002:5002"
+    environment:
+      - FLASK_ENV=development
+    command: python app/services/payments/payments.py
+    networks:
+      - microservices-network
+    restart: unless-stopped
+
+  search-service:
+    build: .
+    container_name: search-service
+    ports:
+      - "5003:5003"
+    environment:
+      - FLASK_ENV=development
+    command: python app/services/search/search.py
+    networks:
+      - microservices-network
+    restart: unless-stopped
+
+networks:
+  microservices-network:
+    driver: bridge
