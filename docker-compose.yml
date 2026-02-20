@@ -1,6 +1,15 @@
 version: "3.8"
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - microservices-network
+    restart: unless-stopped
+
   api-gateway:
     build: .
     container_name: api-gateway
@@ -11,6 +20,26 @@ services:
     command: python app/api_gateway/gateway.py
     networks:
       - microservices-network
+    volumes:
+      - sqlite-data:/data
+    restart: unless-stopped
+
+  celery-worker:
+    build: .
+    container_name: celery-worker
+    ports:
+      - "5005:5005"
+    command: python app/worker/start_worker.py
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SQLITE_DB_PATH=/data/operations.db
+    depends_on:
+      - redis
+    networks:
+      - microservices-network
+    volumes:
+      - sqlite-data:/data
     restart: unless-stopped
 
   reserves-service:
@@ -52,3 +81,6 @@ services:
 networks:
   microservices-network:
     driver: bridge
+
+volumes:
+  sqlite-data:
