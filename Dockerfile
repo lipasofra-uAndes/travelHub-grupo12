@@ -9,8 +9,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar la aplicación
 COPY . .
 
-# Exponer todos los puertos que usaremos
-EXPOSE 5000 5001 5002 5003
+# Establecer PYTHONPATH para que Python encuentre el módulo 'app'
+ENV PYTHONPATH=/app
+
+# Nota: Los puertos específicos se exponen en docker-compose.yml
+# El Gateway usa 5000, Worker usa 5005 para inyección de fallos,
+# y las services internas (5001-5003) no se exponen al cliente
 
 # Por defecto ejecutar el gateway (se puede sobrescribir con docker-compose)
 CMD ["python", "app/api_gateway/gateway.py"]
