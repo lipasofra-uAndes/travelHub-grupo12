@@ -78,6 +78,30 @@ services:
       - microservices-network
     restart: unless-stopped
 
+  monitor:
+    build: .
+    container_name: monitor
+    ports:
+      - "5006:5006"
+    command: python app/monitor/start_monitor.py
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SQLITE_DB_PATH=/data/operations.db
+    depends_on:
+      - redis
+      - celery-worker
+      - api-gateway
+      - reserves-service
+      - payments-service
+      - search-service
+    networks:
+      - microservices-network
+    volumes:
+      - sqlite-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock  # Para recovery automático
+    restart: unless-stopped
+
 networks:
   microservices-network:
     driver: bridge
