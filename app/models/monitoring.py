@@ -15,6 +15,7 @@ class HealthCheck:
     http_code: Optional[int]  # Código HTTP si aplica
     timestamp: str  # ISO8601 de cuando ocurrió
     is_timeout: bool = False  # True si fue timeout
+    error_message: Optional[str] = None  # Mensaje de error si falló
 
     def to_dict(self):
         """Convierte a diccionario para serialización"""

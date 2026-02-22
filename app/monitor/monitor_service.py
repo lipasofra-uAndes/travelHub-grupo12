@@ -1,10 +1,16 @@
-"""Monitor Service - Loop principal de Ping/Echo asíncrono"""
+"""Monitor Service - Loop principal de Ping/Echo híbrido
+
+Diseño:
+- Worker: Ping HTTP directo (sin depender de Celery)
+- Otros servicios: Via cola asíncrona Celery
+"""
 
 import logging
 import os
 import sys
 import time
 import threading
+import requests
 from datetime import datetime
 from uuid import uuid4
 
@@ -13,14 +19,16 @@ from celery import Celery
 # Asegurar que la app está en el path
 sys.path.insert(0, '/app')
 
-from app.worker.db import init_db
-from app.monitor.incident_detector import check_all_services
+from app.worker.db import init_db, save_health_check
+from app.models.monitoring import HealthCheck
+from app.monitor.incident_detector import evaluate_service_health, check_all_services
 from app.constants.queues import (
     ECHO_QUEUE,
     PING_QUEUE,
     TASK_PING_ALL_SERVICES,
     TASK_ECHO_RESPONSE,
     MONITOR_PING_INTERVAL_SECONDS,
+    PING_TIMEOUT_SECONDS,
     MONITORED_SERVICES,
 )
 
@@ -60,48 +68,120 @@ class MonitorService:
         logger.info("Monitor Service initialized")
     
     def send_ping(self) -> str:
-        """Envía un ping asíncrono a través de Celery"""
+        """
+        Ejecuta ping híbrido:
+        1. HTTP directo al Worker (para detectar si Celery está caído)
+        2. Tarea Celery para los otros servicios
+        """
         request_id = f"ping-{uuid4().hex[:8]}"
         
-        try:
-            monitor_celery.send_task(
-                TASK_PING_ALL_SERVICES,
-                kwargs={"request_id": request_id},
-                queue=PING_QUEUE,
-            )
-            
-            self.last_ping_time = datetime.utcnow()
-            self.ping_count += 1
-            
-            logger.debug(f"📤 PING sent: {request_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to send ping: {e}")
+        # 1. PING DIRECTO AL WORKER (HTTP)
+        worker_result = self._ping_worker_direct(request_id)
+        self._log_ping_result(worker_result)
+        
+        # Evaluar incidente del worker inmediatamente
+        worker_incident = evaluate_service_health("worker")
+        if worker_incident[0] == "incident_created":
+            logger.warning(f"🚨 NEW INCIDENT: worker (detected via direct HTTP)")
+        elif worker_incident[0] == "incident_resolved":
+            logger.info(f"✅ INCIDENT RESOLVED: worker")
+        
+        # 2. PING VIA CELERY para otros servicios (solo si el worker está UP)
+        if worker_result["status"] == "UP":
+            try:
+                monitor_celery.send_task(
+                    TASK_PING_ALL_SERVICES,
+                    kwargs={"request_id": request_id},
+                    queue=PING_QUEUE,
+                )
+                logger.debug(f"📤 Celery PING sent: {request_id}")
+            except Exception as e:
+                logger.error(f"Failed to send Celery ping: {e}")
+        else:
+            logger.warning(f"⚠️ Skipping Celery ping - Worker is DOWN")
+        
+        self.last_ping_time = datetime.utcnow()
+        self.ping_count += 1
         
         return request_id
     
+    def _ping_worker_direct(self, request_id: str) -> dict:
+        """
+        Hace ping HTTP directo al worker.
+        Esto permite detectar si el worker/Celery está caído.
+        """
+        worker_url = MONITORED_SERVICES.get("worker", "http://celery-worker:5005/health")
+        start_time = time.time()
+        status = "DOWN"
+        http_code = None
+        is_timeout = False
+        error_message = None
+        
+        try:
+            response = requests.get(worker_url, timeout=PING_TIMEOUT_SECONDS)
+            http_code = response.status_code
+            status = "UP" if response.ok else "DOWN"
+        except requests.Timeout:
+            is_timeout = True
+            error_message = "Timeout"
+        except requests.ConnectionError as e:
+            error_message = f"Connection error: {str(e)[:100]}"
+        except Exception as e:
+            error_message = str(e)[:100]
+        
+        latency_ms = (time.time() - start_time) * 1000
+        
+        # Guardar en SQLite
+        health_check = HealthCheck(
+            id=0,  # Auto-increment en DB
+            service="worker",
+            request_id=request_id,
+            status=status,
+            timestamp=datetime.utcnow().isoformat(),
+            latency_ms=latency_ms,
+            http_code=http_code,
+            is_timeout=is_timeout,
+            error_message=error_message,
+        )
+        save_health_check(health_check)
+        
+        return {
+            "service": "worker",
+            "status": status,
+            "latency_ms": round(latency_ms, 2),
+            "http_code": http_code,
+            "is_failure": status == "DOWN",
+            "method": "HTTP_DIRECT",
+        }
+    
+    def _log_ping_result(self, result: dict):
+        """Log del resultado de un ping"""
+        status_emoji = "✅" if result["status"] == "UP" else "❌"
+        method = result.get("method", "CELERY")
+        logger.info(
+            f"   {status_emoji} {result['service']}: {result['status']} "
+            f"(latency: {result.get('latency_ms', 'N/A')}ms) [{method}]"
+        )
+    
     def process_echo(self, **kwargs):
-        """Procesa un echo recibido y evalúa incidentes"""
+        """Procesa un echo recibido del Worker (para servicios via Celery)"""
         request_id = kwargs.get("request_id")
         results = kwargs.get("results", [])
-        ts = kwargs.get("ts")
         
         self.last_echo_time = datetime.utcnow()
         self.echo_count += 1
         
         logger.info(f"📥 ECHO received: {request_id} with {len(results)} service results")
         
-        # Log resultados
+        # Log resultados (excepto worker que ya se verificó por HTTP directo)
         for result in results:
-            status_emoji = "✅" if not result.get("is_failure") else "❌"
-            logger.info(
-                f"   {status_emoji} {result['service']}: {result['status']} "
-                f"(latency: {result.get('latency_ms', 'N/A')}ms)"
-            )
+            if result.get("service") != "worker":  # Worker ya se verificó
+                self._log_ping_result({**result, "method": "CELERY"})
         
-        # Evaluar incidentes para cada servicio
-        services = list(MONITORED_SERVICES.keys()) + ["redis"]
-        incident_results = check_all_services(services)
+        # Evaluar incidentes para servicios (excepto worker)
+        services_to_check = [s for s in MONITORED_SERVICES.keys() if s != "worker"]
+        services_to_check.append("redis")
+        incident_results = check_all_services(services_to_check)
         
         # Log de incidentes
         for service, incident_info in incident_results.items():

@@ -14,6 +14,7 @@ from app.worker.db import (
     get_incidents_by_service,
     get_all_incidents,
     get_recent_health_checks,
+    get_all_recent_health_checks,
     init_db,
 )
 from app.constants.queues import MONITORED_SERVICES
@@ -147,6 +148,23 @@ def active_incidents():
 
 
 # ==================== HEALTH CHECKS ====================
+
+@app.route("/health-checks", methods=["GET"])
+def all_health_checks():
+    """
+    Obtiene los últimos health checks de todos los servicios.
+    
+    Query params:
+        limit: Número máximo de checks (default: 50)
+    """
+    limit = request.args.get("limit", 50, type=int)
+    checks = get_all_recent_health_checks(limit)
+    
+    return jsonify({
+        "total": len(checks),
+        "checks": [c.to_dict() for c in checks],
+    }), 200
+
 
 @app.route("/health-checks/<service>", methods=["GET"])
 def service_health_checks(service: str):

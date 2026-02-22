@@ -229,6 +229,22 @@ def get_recent_health_checks(service: str, limit: int = 10) -> List[HealthCheck]
     return [HealthCheck.from_row(row) for row in rows]
 
 
+def get_all_recent_health_checks(limit: int = 50) -> List[HealthCheck]:
+    """Obtiene los últimos N health checks de TODOS los servicios"""
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, service, request_id, status, latency_ms, http_code, timestamp, is_timeout 
+            FROM health_checks 
+            ORDER BY id DESC 
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [HealthCheck.from_row(row) for row in rows]
+
+
 def get_last_n_health_checks(service: str, n: int) -> List[HealthCheck]:
     """Obtiene los últimos N health checks (ordenados del más reciente al más antiguo)"""
     return get_recent_health_checks(service, limit=n)
