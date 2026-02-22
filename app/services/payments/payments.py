@@ -64,9 +64,21 @@ class Health(Resource):
         return {"status": "UP", "service": "Payments"}, 200
 
 
+class Ready(Resource):
+    """Ready check - indica si el servicio puede aceptar solicitudes"""
+    def get(self):
+        # Verificar que el servicio está listo para procesar
+        return {
+            "status": "READY",
+            "service": "Payments",
+            "message": "Service ready to accept requests"
+        }, 200
+
+
 # Registrar recursos
 api.add_resource(Pay, '/pay')
 api.add_resource(Health, '/health')
+api.add_resource(Ready, '/ready')
 
 
 if __name__ == '__main__':

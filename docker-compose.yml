@@ -99,6 +99,7 @@ services:
       - microservices-network
     volumes:
       - sqlite-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock  # Para recovery automático
     restart: unless-stopped
 
 networks:

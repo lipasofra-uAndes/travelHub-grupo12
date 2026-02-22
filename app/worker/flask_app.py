@@ -84,7 +84,17 @@ def reset_config_endpoint():
 @flask_app.route("/health", methods=["GET"])
 def health():
     """Health check del worker"""
-    return jsonify({"status": "OK"}), 200
+    return jsonify({"status": "UP", "service": "Worker"}), 200
+
+
+@flask_app.route("/ready", methods=["GET"])
+def ready():
+    """Ready check - indica si el worker puede procesar tareas"""
+    return jsonify({
+        "status": "READY",
+        "service": "Worker",
+        "message": "Worker ready to process tasks"
+    }), 200
 
 
 if __name__ == "__main__":

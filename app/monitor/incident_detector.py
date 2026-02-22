@@ -1,4 +1,4 @@
-"""Detector de incidentes basado en N fallas consecutivas"""
+"""Detector de incidentes basado en N fallas consecutivas + Recovery automático"""
 
 import logging
 from typing import Optional, Tuple
@@ -17,18 +17,28 @@ from app.constants.queues import (
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
 )
+from app.monitor.recovery import recover_service
 
 logger = logging.getLogger(__name__)
 
+# Flag para habilitar/deshabilitar recovery automático
+AUTO_RECOVERY_ENABLED = True
 
-def evaluate_service_health(service: str) -> Tuple[str, Optional[Incident]]:
+
+def evaluate_service_health(service: str, trigger_recovery: bool = True) -> Tuple[str, Optional[Incident], Optional[dict]]:
     """
     Evalúa la salud de un servicio y detecta/resuelve incidentes.
     
+    Args:
+        service: Nombre del servicio a evaluar
+        trigger_recovery: Si True, dispara recovery automático al crear incidente
+    
     Returns:
-        Tuple[str, Optional[Incident]]: (acción tomada, incidente si aplica)
+        Tuple[str, Optional[Incident], Optional[dict]]: (acción tomada, incidente si aplica, resultado recovery)
         - acciones: "healthy", "incident_created", "incident_resolved", "incident_ongoing"
     """
+    recovery_result = None
+    
     # Contar fallas consecutivas
     consecutive_failures, first_failure_ts = count_consecutive_failures(
         service, CONSECUTIVE_FAILURES_THRESHOLD
@@ -61,11 +71,21 @@ def evaluate_service_health(service: str) -> Tuple[str, Optional[Incident]]:
                 f"MTTD: {incident.mttd_seconds:.2f}s"
             )
             
-            return "incident_created", incident
+            # RECOVERY AUTOMÁTICO
+            if AUTO_RECOVERY_ENABLED and trigger_recovery:
+                logger.info(f"🔄 Triggering automatic recovery for {service}")
+                recovery_result = recover_service(service, incident_id=incident.id)
+                
+                if recovery_result.get("success"):
+                    logger.info(f"✅ Recovery initiated for {service}")
+                else:
+                    logger.error(f"❌ Recovery failed for {service}: {recovery_result.get('error')}")
+            
+            return "incident_created", incident, recovery_result
         else:
             # Incidente ya existe, sigue activo
             logger.info(f"⚠️ INCIDENT ONGOING: {service} - {consecutive_failures} failures")
-            return "incident_ongoing", active_incident
+            return "incident_ongoing", active_incident, None
     
     # CASO 2: No hay suficientes fallas
     else:
@@ -84,18 +104,22 @@ def evaluate_service_health(service: str) -> Tuple[str, Optional[Incident]]:
                     f"MTTR: {active_incident.mttr_seconds:.2f}s"
                 )
                 
-                return "incident_resolved", active_incident
+                return "incident_resolved", active_incident, None
             else:
                 # Aún no hay suficientes UPs
-                return "incident_ongoing", active_incident
+                return "incident_ongoing", active_incident, None
         else:
             # Todo healthy
-            return "healthy", None
+            return "healthy", None, None
 
 
-def check_all_services(services: list[str]) -> dict:
+def check_all_services(services: list[str], trigger_recovery: bool = True) -> dict:
     """
     Evalúa la salud de todos los servicios.
+    
+    Args:
+        services: Lista de servicios a evaluar
+        trigger_recovery: Si True, dispara recovery automático al detectar incidente
     
     Returns:
         dict con el estado de cada servicio
@@ -103,7 +127,7 @@ def check_all_services(services: list[str]) -> dict:
     results = {}
     
     for service in services:
-        action, incident = evaluate_service_health(service)
+        action, incident, recovery_result = evaluate_service_health(service, trigger_recovery)
         
         results[service] = {
             "action": action,
@@ -111,6 +135,8 @@ def check_all_services(services: list[str]) -> dict:
             "incident_id": incident.id if incident else None,
             "mttd_seconds": incident.mttd_seconds if incident else None,
             "mttr_seconds": incident.mttr_seconds if incident else None,
+            "recovery_triggered": recovery_result is not None,
+            "recovery_success": recovery_result.get("success") if recovery_result else None,
         }
     
     return results
