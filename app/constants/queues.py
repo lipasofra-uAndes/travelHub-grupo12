@@ -9,11 +9,15 @@ PING_QUEUE = "monitoring.ping"
 # Cola de echo/respuesta del worker
 ECHO_QUEUE = "monitoring.echo"
 
+# Cola de logs de auditoría y seguridad (Etapa 3)
+LOGS_QUEUE = "security.logs"
+
 # Task names
 TASK_PROCESS_OPERATION = "worker.process_operation"
 TASK_PING_WORKER = "worker.ping_worker"
 TASK_PING_ALL_SERVICES = "worker.ping_all_services"
 TASK_ECHO_RESPONSE = "monitor.echo_response"
+TASK_LOG_RECORD = "worker.log_record"
 
 # Timeouts y delays
 PING_TIMEOUT_SECONDS = 5
