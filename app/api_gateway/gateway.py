@@ -10,7 +10,7 @@ from uuid import uuid4
 from app.worker.celery_app import celery_app
 from app.worker.db import get_operation, save_operation, log_echo, init_db
 from app.models.operation import Operation
-from app.constants.queues import TASK_PROCESS_OPERATION, OPERATIONS_QUEUE, TASK_PING_WORKER, PING_QUEUE
+from app.constants.queues import TASK_PROCESS_OPERATION, OPERATIONS_QUEUE, TASK_PING_WORKER, PING_QUEUE, TASK_LOG_RECORD, LOGS_QUEUE
 
 # Inicializar BD
 init_db()
@@ -213,12 +213,91 @@ class PingApi(Resource):
             return {"error": str(e)}, 500
 
 
+class UpdateRatesOperation(Resource):
+    """
+    Endpoint PUT para modificación de tarifas con validación de acceso por hotelId.
+    Valida que el usuario autenticado solo pueda modificar tarifas de su propio hotel.
+    Rechaza con HTTP 403 si intenta acceder a otro hotel.
+    """
+    def put(self, hotel_id):
+        try:
+            data = request.get_json()
+            
+            # Validar campos requeridos
+            if not data or "rates" not in data:
+                return {"error": "Campo 'rates' requerido en el body"}, 400
+            
+            # Función estaAutorizado() extrae el token, valida el JWT,
+            # y compara hotelId del token con el hotelId de la solicitud
+            auth_header = request.headers.get('Authorization', '')
+            
+            is_authorized = self._estaAutorizado(auth_header, hotel_id)
+            
+            if not is_authorized:
+                # Registrar intento de acceso no autorizado
+                # generateLog() maneja el encolado del log a la cola
+                self._generateLog(
+                    action="UPDATE_RATES_DENIED",
+                    hotel_id=hotel_id,
+                    status="FORBIDDEN",
+                    http_code=403,
+                    message="Usuario no autorizado para modificar tarifas de este hotel",
+                    operation_data=None
+                )
+                
+                logger.warning(f"Intento de acceso no autorizado a tarifas del hotel {hotel_id}")
+                return {
+                    "error": "No autorizado",
+                    "message": "No tienes permiso para modificar las tarifas de este hotel"
+                }, 403
+            
+            # Crear operación en estado PENDING
+            operation_id = str(uuid4())
+            operation = Operation.pending(operation_id, "update_rates", {
+                "hotel_id": hotel_id,
+                "rates": data.get('rates')
+            })
+            save_operation(operation)
+            
+            # generateLog() encola tanto el log como la operación (si está autorizada)
+            # Pasar operation_id para que generateLog() encole la operación a OPERATIONS_QUEUE
+            self._generateLog(
+                action="UPDATE_RATES_STARTED",
+                hotel_id=hotel_id,
+                status="AUTHORIZED",
+                http_code=202,
+                message="Solicitud de modificación de tarifas autorizada y encolada",
+                operation_data={"operation_id": operation_id}
+            )
+            
+            logger.info(f"Operación de actualización de tarifas encolada: {operation_id} para hotel {hotel_id}")
+            
+            return {
+                "operation_id": operation_id,
+                "status": "PENDING",
+                "message": "Operación de actualización de tarifas encolada para procesamiento",
+                "status_url": f"/ops/{operation_id}"
+            }, 202
+            
+        except Exception as e:
+            logger.error(f"Error al procesar actualización de tarifas: {str(e)}")
+            self._generateLog(
+                action="UPDATE_RATES_ERROR",
+                hotel_id=hotel_id,
+                status="ERROR",
+                http_code=500,
+                message=f"Error interno: {str(e)}"
+            )
+            return {"error": str(e)}, 500
+
+
 # Registrar recursos
 api.add_resource(Health, '/health')
 api.add_resource(Ready, '/ready')
 api.add_resource(ReserveOperation, '/reserve')
 api.add_resource(PayOperation, '/pay')
 api.add_resource(SearchOperation, '/search')
+api.add_resource(UpdateRatesOperation, '/tarifas/<hotel_id>')
 api.add_resource(OperationStatus, '/ops/<operation_id>')
 api.add_resource(PingApi, '/ping')
 
