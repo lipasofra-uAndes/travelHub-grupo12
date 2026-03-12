@@ -227,8 +227,8 @@ class UpdateRatesOperation(Resource):
             if not data or "rates" not in data:
                 return {"error": "Campo 'rates' requerido en el body"}, 400
             
-            # Función estaAutorizado() extrae el token, valida el JWT,
-            # y compara hotelId del token con el hotelId de la solicitud
+            # TODO: Implementar validacion real de autorizacion con JWT
+            # (userId, tokenHotelId y comparacion contra hotel_id solicitado).
             auth_header = request.headers.get('Authorization', '')
             
             is_authorized = self._estaAutorizado(auth_header, hotel_id)
@@ -289,6 +289,15 @@ class UpdateRatesOperation(Resource):
                 message=f"Error interno: {str(e)}"
             )
             return {"error": str(e)}, 500
+
+    def _estaAutorizado(self, auth_header: str, hotel_id: str) -> bool:
+        """
+        TODO: Implementar autorizacion real usando JWT.
+        Por ahora retorna False para forzar el flujo de denegacion y auditoria.
+        """
+        _ = auth_header
+        _ = hotel_id
+        return False
 
     def _generateLog(
         self,

@@ -11,7 +11,7 @@ sys.path.insert(0, '/app')
 from app.monitor.monitor_service import MonitorService, monitor_celery
 from app.monitor.api import app as flask_app
 from app.worker.db import init_db
-from app.constants.queues import ECHO_QUEUE
+from app.constants.queues import ECHO_QUEUE, LOGS_QUEUE
 
 
 def run_celery():
@@ -19,7 +19,7 @@ def run_celery():
     monitor_celery.worker_main(argv=[
         'worker',
         '--loglevel=info',
-        f'--queues={ECHO_QUEUE}',
+        f'--queues={ECHO_QUEUE},{LOGS_QUEUE}',
         '--hostname=monitor@%h',
     ])
 
@@ -51,7 +51,7 @@ if __name__ == '__main__':
     ping_process = Process(target=run_ping_loop, daemon=False)
     
     print("🔍 Iniciando Monitor Service...")
-    print("   - Celery: escuchando cola monitoring.echo")
+    print("   - Celery: escuchando colas monitoring.echo y security.logs")
     print("   - Flask API: escuchando en puerto 5006")
     print("   - Ping Loop: enviando pings cada 5 segundos")
     
