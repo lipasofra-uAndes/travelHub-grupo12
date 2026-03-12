@@ -290,6 +290,65 @@ class UpdateRatesOperation(Resource):
             )
             return {"error": str(e)}, 500
 
+    def _generateLog(
+        self,
+        action: str,
+        hotel_id: str,
+        status: str,
+        http_code: int,
+        message: str,
+        operation_data: dict = None,
+        user_id: str = None,
+        token_hotel_id: int = None,
+    ) -> dict:
+        """
+        Construye un JSON de auditoría y lo publica en LOGS_QUEUE mediante Celery.
+
+        El worker consumirá este mensaje a través de la tarea TASK_LOG_RECORD
+        (app.audit.audit_service.log_record).
+
+        El payload incluye todos los campos necesarios para construir:
+          - SecurityViolationEvent (event_id, timestamp, user_id, token_hotel_id,
+                                    requested_hotel_id, endpoint, method, ip_address, action)
+          - AuditLogEntry          (log_id, event_id, status, http_code, message, payload completo)
+        """
+        event_id = str(uuid4())
+        timestamp = datetime.utcnow().isoformat() + "Z"
+
+        payload = {
+            # --- SecurityViolationEvent ---
+            "event_id": event_id,
+            "timestamp": timestamp,
+            "user_id": user_id,
+            "token_hotel_id": token_hotel_id,
+            "requested_hotel_id": hotel_id,
+            "endpoint": request.path,
+            "method": request.method,
+            "ip_address": request.remote_addr,
+            "action": action,
+
+            # --- AuditLogEntry ---
+            "log_id": event_id,          # id del registro de auditoría
+            "status": status,
+            "http_code": http_code,
+            "message": message,
+        }
+
+        if operation_data:
+            payload["operation_data"] = operation_data
+
+        celery_app.send_task(
+            TASK_LOG_RECORD,
+            kwargs=payload,
+            queue=LOGS_QUEUE,
+        )
+
+        logger.info(
+            f"[AUDIT] Log encolado: event_id={event_id} | action={action} "
+            f"| requested_hotel_id={hotel_id} | status={status} | http_code={http_code}"
+        )
+        return payload
+
 
 # Registrar recursos
 api.add_resource(Health, '/health')
