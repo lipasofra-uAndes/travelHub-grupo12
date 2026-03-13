@@ -24,9 +24,11 @@ from app.models.monitoring import HealthCheck
 from app.monitor.incident_detector import evaluate_service_health, check_all_services
 from app.constants.queues import (
     ECHO_QUEUE,
+    LOGS_QUEUE,
     PING_QUEUE,
     TASK_PING_ALL_SERVICES,
     TASK_ECHO_RESPONSE,
+    TASK_LOG_RECORD,
     MONITOR_PING_INTERVAL_SECONDS,
     PING_TIMEOUT_SECONDS,
     MONITORED_SERVICES,
@@ -248,6 +250,40 @@ def echo_response(**kwargs):
     check_all_services(services)
     
     return {"processed": True, "request_id": request_id}
+
+
+@monitor_celery.task(name=TASK_LOG_RECORD)
+def consume_security_log(**kwargs):
+    """Consume mensajes de seguridad/auditoría desde LOGS_QUEUE."""
+    event_id = kwargs.get("event_id")
+    requested_hotel_id = kwargs.get("requested_hotel_id")
+    endpoint = kwargs.get("endpoint")
+    method = kwargs.get("method")
+    ip_address = kwargs.get("ip_address")
+    action = kwargs.get("action")
+    status = kwargs.get("status")
+    timestamp = kwargs.get("timestamp")
+
+    logger.warning(
+        "[SECURITY EVENT] SecurityViolationEvent "
+        f"eventId={event_id} timestamp={timestamp} "
+        f"userId={kwargs.get('user_id')} tokenHotelId={kwargs.get('token_hotel_id')} "
+        f"requestedHotelId={requested_hotel_id} endpoint={endpoint} method={method} "
+        f"ipAddress={ip_address} action={action}"
+    )
+
+    logger.info(
+        "[AUDIT ENTRY] AuditLogEntry "
+        f"id={kwargs.get('log_id')} eventId={event_id} "
+        f"receivedAt={datetime.utcnow().isoformat()}Z persistedAt=None "
+        f"status={status} payload_keys={list(kwargs.keys())}"
+    )
+
+    # TODO: Persistir SecurityViolationEvent y AuditLogEntry en base de datos
+    # para habilitar reportes y analisis historico (tendencias, violaciones por hotel,
+    # origen de IPs, frecuencia por endpoint, y tasa de eventos FAILED/PERSISTED).
+
+    return {"processed": True, "event_id": event_id}
 
 
 # Instancia global del monitor

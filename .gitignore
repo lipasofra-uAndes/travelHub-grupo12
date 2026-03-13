@@ -1,0 +1,12 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+
+# Test and coverage artifacts
+.pytest_cache/
+__pytest_cache__/
+htmlcov/
+.coverage

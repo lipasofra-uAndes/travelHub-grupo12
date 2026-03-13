@@ -227,8 +227,8 @@ class UpdateRatesOperation(Resource):
             if not data or "rates" not in data:
                 return {"error": "Campo 'rates' requerido en el body"}, 400
             
-            # Función estaAutorizado() extrae el token, valida el JWT,
-            # y compara hotelId del token con el hotelId de la solicitud
+            # TODO: Implementar validacion real de autorizacion con JWT
+            # (userId, tokenHotelId y comparacion contra hotel_id solicitado).
             auth_header = request.headers.get('Authorization', '')
             
             is_authorized = self._estaAutorizado(auth_header, hotel_id)
@@ -289,6 +289,74 @@ class UpdateRatesOperation(Resource):
                 message=f"Error interno: {str(e)}"
             )
             return {"error": str(e)}, 500
+
+    def _estaAutorizado(self, auth_header: str, hotel_id: str) -> bool:
+        """
+        TODO: Implementar autorizacion real usando JWT.
+        Por ahora retorna False para forzar el flujo de denegacion y auditoria.
+        """
+        _ = auth_header
+        _ = hotel_id
+        return False
+
+    def _generateLog(
+        self,
+        action: str,
+        hotel_id: str,
+        status: str,
+        http_code: int,
+        message: str,
+        operation_data: dict = None,
+        user_id: str = None,
+        token_hotel_id: int = None,
+    ) -> dict:
+        """
+        Construye un JSON de auditoría y lo publica en LOGS_QUEUE mediante Celery.
+
+        El worker consumirá este mensaje a través de la tarea TASK_LOG_RECORD
+        (app.audit.audit_service.log_record).
+
+        El payload incluye todos los campos necesarios para construir:
+          - SecurityViolationEvent (event_id, timestamp, user_id, token_hotel_id,
+                                    requested_hotel_id, endpoint, method, ip_address, action)
+          - AuditLogEntry          (log_id, event_id, status, http_code, message, payload completo)
+        """
+        event_id = str(uuid4())
+        timestamp = datetime.utcnow().isoformat() + "Z"
+
+        payload = {
+            # --- SecurityViolationEvent ---
+            "event_id": event_id,
+            "timestamp": timestamp,
+            "user_id": user_id,
+            "token_hotel_id": token_hotel_id,
+            "requested_hotel_id": hotel_id,
+            "endpoint": request.path,
+            "method": request.method,
+            "ip_address": request.remote_addr,
+            "action": action,
+
+            # --- AuditLogEntry ---
+            "log_id": event_id,          # id del registro de auditoría
+            "status": status,
+            "http_code": http_code,
+            "message": message,
+        }
+
+        if operation_data:
+            payload["operation_data"] = operation_data
+
+        celery_app.send_task(
+            TASK_LOG_RECORD,
+            kwargs=payload,
+            queue=LOGS_QUEUE,
+        )
+
+        logger.info(
+            f"[AUDIT] Log encolado: event_id={event_id} | action={action} "
+            f"| requested_hotel_id={hotel_id} | status={status} | http_code={http_code}"
+        )
+        return payload
 
 
 # Registrar recursos
