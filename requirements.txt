@@ -5,6 +5,7 @@ Werkzeug==2.3.7
 celery==5.4.0
 redis==5.0.7
 pydantic==2.5.0
+PyJWT==2.8.0
 pytest==7.4.3
 pytest-cov==4.1.0
 pytest-mock==3.12.0
