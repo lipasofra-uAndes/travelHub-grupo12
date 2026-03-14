@@ -11,6 +11,7 @@ from app.worker.celery_app import celery_app
 from app.worker.db import get_operation, save_operation, log_echo, init_db
 from app.models.operation import Operation
 from app.constants.queues import TASK_PROCESS_OPERATION, OPERATIONS_QUEUE, TASK_PING_WORKER, PING_QUEUE, TASK_LOG_RECORD, LOGS_QUEUE
+from app.auth.auth_component import estaAutorizado
 
 # Inicializar BD
 init_db()
@@ -227,13 +228,11 @@ class UpdateRatesOperation(Resource):
             if not data or "rates" not in data:
                 return {"error": "Campo 'rates' requerido en el body"}, 400
             
-            # TODO: Implementar validacion real de autorizacion con JWT
-            # (userId, tokenHotelId y comparacion contra hotel_id solicitado).
             auth_header = request.headers.get('Authorization', '')
             
-            is_authorized = self._estaAutorizado(auth_header, hotel_id)
-            
-            if not is_authorized:
+            auth_result = self._estaAutorizado(auth_header, hotel_id)
+
+            if not auth_result["authorized"]:
                 # Registrar intento de acceso no autorizado
                 # generateLog() maneja el encolado del log a la cola
                 self._generateLog(
@@ -242,7 +241,9 @@ class UpdateRatesOperation(Resource):
                     status="FORBIDDEN",
                     http_code=403,
                     message="Usuario no autorizado para modificar tarifas de este hotel",
-                    operation_data=None
+                    operation_data=None,
+                    user_id=auth_result["user_id"],
+                    token_hotel_id=auth_result["token_hotel_id"],
                 )
                 
                 logger.warning(f"Intento de acceso no autorizado a tarifas del hotel {hotel_id}")
@@ -267,7 +268,9 @@ class UpdateRatesOperation(Resource):
                 status="AUTHORIZED",
                 http_code=202,
                 message="Solicitud de modificación de tarifas autorizada y encolada",
-                operation_data={"operation_id": operation_id}
+                operation_data={"operation_id": operation_id},
+                user_id=auth_result["user_id"],
+                token_hotel_id=auth_result["token_hotel_id"],
             )
             
             logger.info(f"Operación de actualización de tarifas encolada: {operation_id} para hotel {hotel_id}")
@@ -290,14 +293,21 @@ class UpdateRatesOperation(Resource):
             )
             return {"error": str(e)}, 500
 
-    def _estaAutorizado(self, auth_header: str, hotel_id: str) -> bool:
+    def _estaAutorizado(self, auth_header: str, hotel_id: str) -> dict:
         """
-        TODO: Implementar autorizacion real usando JWT.
-        Por ahora retorna False para forzar el flujo de denegacion y auditoria.
+        Valida el JWT del header Authorization y verifica que el hotel_id
+        del token coincida con el hotel_id solicitado.
         """
-        _ = auth_header
-        _ = hotel_id
-        return False
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {
+                "authorized": False,
+                "user_id": None,
+                "token_hotel_id": None,
+                "error": "Header Authorization ausente o formato inválido",
+            }
+
+        token = auth_header[len("Bearer "):]
+        return estaAutorizado(token, hotel_id)
 
     def _generateLog(
         self,
@@ -308,7 +318,7 @@ class UpdateRatesOperation(Resource):
         message: str,
         operation_data: dict = None,
         user_id: str = None,
-        token_hotel_id: int = None,
+        token_hotel_id: str = None,
     ) -> dict:
         """
         Construye un JSON de auditoría y lo publica en LOGS_QUEUE mediante Celery.
